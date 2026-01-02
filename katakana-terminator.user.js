@@ -13,7 +13,6 @@
 // @grant       GM.xmlHttpRequest
 // @grant       GM_xmlhttpRequest
 // @grant       GM_addStyle
-// @connect     translate.google.cn
 // @connect     translate.google.com
 // @connect     translate.googleapis.com
 // @version     2024.05.05
@@ -47,6 +46,9 @@ function scanTextNodes(node) {
             return Array.from(node.childNodes).forEach(scanTextNodes);
 
         case Node.TEXT_NODE:
+            if (node._isKatakanaTerminatorReplacement) {
+                return;
+            }
             while ((node = addRuby(node)));
     }
 }
@@ -58,18 +60,17 @@ function addRuby(node) {
     if (!node.nodeValue || !(match = katakana.exec(node.nodeValue))) {
         return false;
     }
-    var span = _.createElement('span');
-    span.classList.add('katakana-terminator-span');
-    span.textContent = match[0];
+    var replacementNode = _.createTextNode(match[0]);
+    replacementNode._isKatakanaTerminatorReplacement = true;
 
     // Append the ruby title node to the pending-translation queue
     queue[match[0]] = queue[match[0]] || [];
-    queue[match[0]].push(span);
+    queue[match[0]].push(replacementNode);
 
     // <span>[startカナmiddleテストend]</span> =>
-    // <span>start<span class="katakana-terminator-span">カナ</span>[middleテストend]</span>
+    // <span>[start Kana middle test end</span>
     var after = node.splitText(match.index);
-    node.parentNode.insertBefore(span, after);
+    node.parentNode.insertBefore(replacementNode, after);
     after.nodeValue = after.nodeValue.substring(match[0].length);
     return after;
 }
@@ -221,7 +222,6 @@ function updateRubyByCachedTranslations(phrase) {
         return;
     }
     (queue[phrase] || []).forEach(function (node) {
-        node.title = phrase;
         node.textContent = cachedTranslations[phrase];
     });
     delete queue[phrase];
