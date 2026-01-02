@@ -37,17 +37,17 @@ function scanTextNodes(node) {
     }
 
     // Ignore text boxes and echoes
-    var excludeTags = {ruby: true, script: true, select: true, textarea: true};
+    var excludeTags = { ruby: true, script: true, select: true, textarea: true };
 
     switch (node.nodeType) {
-    case Node.ELEMENT_NODE:
-        if (node.tagName.toLowerCase() in excludeTags || node.isContentEditable) {
-            return;
-        }
-        return Array.from(node.childNodes).forEach(scanTextNodes);
+        case Node.ELEMENT_NODE:
+            if (node.tagName.toLowerCase() in excludeTags || node.classList.contains('katakana-terminator-span') || node.isContentEditable) {
+                return;
+            }
+            return Array.from(node.childNodes).forEach(scanTextNodes);
 
-    case Node.TEXT_NODE:
-        while ((node = addRuby(node)));
+        case Node.TEXT_NODE:
+            while ((node = addRuby(node)));
     }
 }
 
@@ -58,20 +58,18 @@ function addRuby(node) {
     if (!node.nodeValue || !(match = katakana.exec(node.nodeValue))) {
         return false;
     }
-    var ruby = _.createElement('ruby');
-    ruby.appendChild(_.createTextNode(match[0]));
-    var rt = _.createElement('rt');
-    rt.classList.add('katakana-terminator-rt');
-    ruby.appendChild(rt);
+    var span = _.createElement('span');
+    span.classList.add('katakana-terminator-span');
+    span.textContent = match[0];
 
     // Append the ruby title node to the pending-translation queue
     queue[match[0]] = queue[match[0]] || [];
-    queue[match[0]].push(rt);
+    queue[match[0]].push(span);
 
     // <span>[startカナmiddleテストend]</span> =>
-    // <span>start<ruby>カナ<rt data-rt="Kana"></rt></ruby>[middleテストend]</span>
+    // <span>start<span class="katakana-terminator-span">カナ</span>[middleテストend]</span>
     var after = node.splitText(match.index);
-    node.parentNode.insertBefore(ruby, after);
+    node.parentNode.insertBefore(span, after);
     after.nodeValue = after.nodeValue.substring(match[0].length);
     return after;
 }
@@ -110,7 +108,7 @@ function translateTextNodes() {
 
 // {"keyA": 1, "keyB": 2} => "?keyA=1&keyB=2"
 function buildQueryString(params) {
-    return '?' + Object.keys(params).map(function(k) {
+    return '?' + Object.keys(params).map(function (k) {
         return encodeURIComponent(k) + '=' + encodeURIComponent(params[k]);
     }).join('&');
 }
@@ -118,13 +116,13 @@ function buildQueryString(params) {
 function translate(phrases) {
     if (!apiList.length) {
         console.error('Katakana Terminator: fallbacks exhausted', phrases);
-        phrases.forEach(function(phrase) {
+        phrases.forEach(function (phrase) {
             delete cachedTranslations[phrase];
         });
     }
 
     // Prevent duplicate HTTP requests before the request completes
-    phrases.forEach(function(phrase) {
+    phrases.forEach(function (phrase) {
         cachedTranslations[phrase] = null;
     });
 
@@ -132,7 +130,7 @@ function translate(phrases) {
     GM_xmlhttpRequest({
         method: "GET",
         url: 'https://' + api.hosts[0] + api.path + buildQueryString(api.params(phrases)),
-        onload: function(dom) {
+        onload: function (dom) {
             try {
                 api.callback(phrases, JSON.parse(dom.responseText.replace("'", '\u2019')));
             } catch (err) {
@@ -141,7 +139,7 @@ function translate(phrases) {
                 return translate(phrases);
             }
         },
-        onerror: function() {
+        onerror: function () {
             console.error('Katakana Terminator: request error', api.url);
             apiList.shift();
             return translate(phrases);
@@ -155,7 +153,7 @@ var apiList = [
         name: 'Google Translate',
         hosts: ['translate.googleapis.com'],
         path: '/translate_a/single',
-        params: function(phrases) {
+        params: function (phrases) {
             var joinedText = phrases.join('\n').replace(/\s+$/, '');
             return {
                 sl: 'ja',
@@ -165,10 +163,10 @@ var apiList = [
                 q: joinedText,
             };
         },
-        callback: function(phrases, resp) {
-            resp[0].forEach(function(item) {
+        callback: function (phrases, resp) {
+            resp[0].forEach(function (item) {
                 var translated = item[0].replace(/\s+$/, ''),
-                    original   = item[1].replace(/\s+$/, '');
+                    original = item[1].replace(/\s+$/, '');
                 cachedTranslations[original] = translated;
                 updateRubyByCachedTranslations(original);
             });
@@ -177,9 +175,9 @@ var apiList = [
     {
         // https://github.com/ssut/py-googletrans/issues/268
         name: 'Google Dictionary',
-        hosts: ['translate.google.cn'],
+        hosts: ['translate.google.com'],
         path: '/translate_a/t',
-        params: function(phrases) {
+        params: function (phrases) {
             var joinedText = phrases.join('\n').replace(/\s+$/, '');
             return {
                 sl: 'ja',
@@ -189,14 +187,14 @@ var apiList = [
                 q: joinedText,
             };
         },
-        callback: function(phrases, resp) {
+        callback: function (phrases, resp) {
             // ["katakana\nterminator"]
             if (!resp.sentences) {
                 var translated = resp[0].split('\n');
                 if (translated.length !== phrases.length) {
                     throw [phrases, resp];
                 }
-                translated.forEach(function(trans, i) {
+                translated.forEach(function (trans, i) {
                     var orig = phrases[i];
                     cachedTranslations[orig] = trans;
                     updateRubyByCachedTranslations(orig);
@@ -204,7 +202,7 @@ var apiList = [
                 return;
             }
 
-            resp.sentences.forEach(function(s) {
+            resp.sentences.forEach(function (s) {
                 if (!s.orig) {
                     return;
                 }
@@ -222,26 +220,26 @@ function updateRubyByCachedTranslations(phrase) {
     if (!cachedTranslations[phrase]) {
         return;
     }
-    (queue[phrase] || []).forEach(function(node) {
-        node.dataset.rt = cachedTranslations[phrase];
+    (queue[phrase] || []).forEach(function (node) {
+        node.title = phrase;
+        node.textContent = cachedTranslations[phrase];
     });
     delete queue[phrase];
 }
 
 // Watch newly added DOM nodes, and save them for later use
 function mutationHandler(mutationList) {
-    mutationList.forEach(function(mutationRecord) {
-        mutationRecord.addedNodes.forEach(function(node) {
+    mutationList.forEach(function (mutationRecord) {
+        mutationRecord.addedNodes.forEach(function (node) {
             newNodes.push(node);
         });
     });
 }
 
 function main() {
-    GM_addStyle("rt.katakana-terminator-rt::before { content: attr(data-rt); }");
 
     var observer = new MutationObserver(mutationHandler);
-    observer.observe(_.body, {childList: true, subtree: true});
+    observer.observe(_.body, { childList: true, subtree: true });
 
     function rescanTextNodes() {
         // Deplete buffered mutations
@@ -268,7 +266,7 @@ if (typeof GM_xmlhttpRequest === 'undefined' &&
 }
 
 if (typeof GM_addStyle === 'undefined') {
-    GM_addStyle = function(css) {
+    GM_addStyle = function (css) {
         var head = _.getElementsByTagName('head')[0];
         if (!head) {
             return null;
@@ -284,7 +282,7 @@ if (typeof GM_addStyle === 'undefined') {
 
 // Polyfill for ES5
 if (typeof NodeList.prototype.forEach === 'undefined') {
-    NodeList.prototype.forEach = function(callback, thisArg) {
+    NodeList.prototype.forEach = function (callback, thisArg) {
         thisArg = thisArg || window;
         for (var i = 0; i < this.length; i++) {
             callback.call(thisArg, this[i], i, this);
